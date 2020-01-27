@@ -37,13 +37,53 @@ public:
 			m_sHostmaskWildcard = "*!*@*";
 	}
 
-	bool IsMatch(const CString& sChan, const CString& sHost, const CString& sMessage) const {
+	bool IsMatch(const CString& sChan, const CString& sHost, const CString& sMessage, CChan& Channel) const {
 		if (!sHost.WildCmp(m_sHostmaskWildcard))
 			return false;
 		if (!sChan.WildCmp(m_sChannelWildcard))
 			return false;
 		if (!sMessage.WildCmp(m_pModule->ExpandString(m_sSearchWildcard)))
 			return false;
+
+		// Don't attach on spam, mass-ping messages
+		unsigned int nMessageSize;
+		unsigned int nNickMatches = 0;
+
+		// 1. Split up the message
+		VCString vsMessage;
+		sMessage.Split(" ", vsMessage, false);
+		nMessageSize = vsMessage.size();
+
+		// If the message is short, then default to attaching.
+		// We don't want to accidentally ignore "hi relrod" for example.
+		// TODO: Make this number configurable at runtime.
+		if (nMessageSize < 4) {
+			return true;
+		}
+
+		// 2. Obtain the list of nicks and look for matches
+		const std::map<CString, CNick>& msNicks = Channel.GetNicks();
+
+		// Iterate the splitted message string. *it is a CString word.
+		for (
+			VCString::iterator it = vsMessage.begin();
+			it != vsMessage.end();
+			++it) {
+			auto word = msNicks.find(*it);
+			if (word == msNicks.end()) {
+				// The word is NOT a nick, so move on.
+				continue;
+			} else {
+				nNickMatches++;
+			}
+		}
+
+		// 3. See what percentage of the message is, in fact, nicks
+		// TODO: Make this percentage configurable at runtime.
+		if (100 * (nNickMatches / nMessageSize) > 80) {
+			return false;
+		}
+
 		return true;
 	}
 
@@ -204,13 +244,13 @@ public:
 
 		// Any negated match?
 		for (it = m_vMatches.begin(); it != m_vMatches.end(); ++it) {
-			if (it->IsNegated() && it->IsMatch(sChan, sHost, sMessage))
+			if (it->IsNegated() && it->IsMatch(sChan, sHost, sMessage, Channel))
 				return;
 		}
 
 		// Now check for a positive match
 		for (it = m_vMatches.begin(); it != m_vMatches.end(); ++it) {
-			if (!it->IsNegated() && it->IsMatch(sChan, sHost, sMessage)) {
+			if (!it->IsNegated() && it->IsMatch(sChan, sHost, sMessage, Channel)) {
 				Channel.AttachUser();
 				return;
 			}
@@ -287,4 +327,4 @@ template<> void TModInfo<CChanAttach>(CModInfo& Info) {
 	Info.SetArgsHelpText("List of channel masks and channel masks with ! before them.");
 }
 
-NETWORKMODULEDEFS(CChanAttach, "Reattaches you to channels on activity.")
+NETWORKMODULEDEFS(CChanAttach, "Reattaches you to channels on activity (patched).")
